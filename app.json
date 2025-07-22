@@ -1,0 +1,24 @@
+{
+  "name": "XQueen Inline Game Bot",
+  "description": "🎮 A stylish inline Telegram bot with fun mini-games for groups (Dice, Quiz, RPS, etc.)",
+  "repository": "https://github.com/ASIFXQUEEN903/XQUEEN-GAMW-BOT",
+  "logo": "https://telegra.ph/file/8b570fdd5c2ff7d94e72a.jpg",
+  "keywords": ["telegram", "inline", "bot", "games", "python"],
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your bot token from BotFather",
+      "required": true
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ],
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "free"
+    }
+  }
+}
