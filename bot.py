@@ -1,84 +1,105 @@
 import os
 import random
-from telegram import InlineQueryResultArticle, InputTextMessageContent, Update
-from telegram.ext import Application, InlineQueryHandler, ContextTypes
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, InlineQueryHandler, ContextTypes
 from uuid import uuid4
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Heroku env se token
+# Global game storage
+GAMES = {}
 
-# Stylish font helper
-def stylize(text):
-    normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    fancy = "𝒶𝒷𝒸𝒹𝑒𝒻𝑔𝒽𝒾𝒿𝓀𝓁𝓂𝓃𝑜𝓅𝓆𝓇𝓈𝓉𝓊𝓋𝓌𝓍𝓎𝓏ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    return ''.join(fancy[normal.index(c)] if c in normal else c for c in text)
+# Constants
+GRID_SIZE = 5
+TOTAL_MINES = 5
 
-# Game logic functions
-def dice_game():
-    number = random.randint(1, 6)
-    return f"🎲 {stylize('You rolled a')} {number}!"
-
-def coin_toss():
-    result = random.choice(["🪙 Heads", "🪙 Tails"])
-    return stylize(result)
-
-def guess_number():
-    correct = random.randint(1, 10)
-    return f"🔢 {stylize('Guess a number between 1-10')} → {correct}"
-
-def quiz_game():
-    q = random.choice([
-        ("What is the capital of India?", "Delhi"),
-        ("5 + 7 = ?", "12"),
-        ("Color of banana?", "Yellow"),
-        ("Who wrote Ramayana?", "Valmiki")
-    ])
-    return f"❓ {stylize(q[0])}\n{stylize('Answer')}: {stylize(q[1])}"
-
-def word_scramble():
-    words = ["python", "telegram", "inline", "gamer", "india"]
-    word = random.choice(words)
-    scrambled = ''.join(random.sample(word, len(word)))
-    return f"🔤 {stylize('Unscramble this')}: {scrambled}\n{stylize('Answer')}: {word}"
-
-def rps_game():
-    user = random.choice(["🪨 Rock", "📄 Paper", "✂️ Scissors"])
-    bot = random.choice(["🪨 Rock", "📄 Paper", "✂️ Scissors"])
-    result = "Draw" if user == bot else "You Win!" if (
-        user == "🪨 Rock" and bot == "✂️ Scissors") or (
-        user == "📄 Paper" and bot == "🪨 Rock") or (
-        user == "✂️ Scissors" and bot == "📄 Paper") else "You Lose!"
-    return f"🤖 {stylize('Bot chose')}: {bot}\n🙋 {stylize('You got')}: {user}\n🎮 {stylize(result)}"
-
-# Inline query handler
-async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.inline_query.query.lower()
-    results = []
-
-    games = {
-        "dice": dice_game,
-        "coin": coin_toss,
-        "guess": guess_number,
-        "quiz": quiz_game,
-        "scramble": word_scramble,
-        "rps": rps_game
+# Create new game board
+def create_game() -> dict:
+    grid = [["⬜" for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
+    mines = set()
+    while len(mines) < TOTAL_MINES:
+        x, y = random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1)
+        mines.add((x, y))
+    return {
+        "grid": grid,
+        "mines": mines,
+        "revealed": set(),
+        "over": False,
+        "winner": None
     }
 
-    for key, func in games.items():
-        if query in key or not query:
-            results.append(
-                InlineQueryResultArticle(
-                    id=str(uuid4()),
-                    title=key.capitalize() + " Game",
-                    description="Play " + key + " game",
-                    input_message_content=InputTextMessageContent(func(), parse_mode="Markdown")
-                )
-            )
+# Build clickable grid
+def build_markup(game_id):
+    game = GAMES[game_id]
+    buttons = []
+    for i in range(GRID_SIZE):
+        row = []
+        for j in range(GRID_SIZE):
+            cell = game['grid'][i][j]
+            row.append(InlineKeyboardButton(cell, callback_data=f"{game_id}:{i}:{j}"))
+        buttons.append(row)
+    return InlineKeyboardMarkup(buttons)
 
-    await update.inline_query.answer(results[:10], cache_time=1)
+# Handle clicks
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user.first_name
+    data = query.data
+    game_id, x, y = data.split(":")
+    x, y = int(x), int(y)
+    game = GAMES.get(game_id)
+
+    if not game or game['over']:
+        await query.edit_message_text("❌ This game is over or invalid.")
+        return
+
+    if (x, y) in game['mines']:
+        game['grid'][x][y] = "💥"
+        game['over'] = True
+        await query.edit_message_text(
+            f"💣 BOOM! {user} clicked a mine!\n❌ LOSER: {user}",
+            reply_markup=build_markup(game_id)
+        )
+        return
+
+    game['grid'][x][y] = "✅"
+    game['revealed'].add((x, y))
+
+    if GRID_SIZE * GRID_SIZE - len(game['mines']) == len(game['revealed']):
+        game['over'] = True
+        game['winner'] = user
+        await query.edit_message_text(
+            f"🎉 All safe boxes opened!\n✅ WINNER: {user}",
+            reply_markup=build_markup(game_id)
+        )
+        return
+
+    await query.edit_message_reply_markup(reply_markup=build_markup(game_id))
+
+# Start game via inline query
+async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query
+    game_id = str(uuid4())[:8]
+    GAMES[game_id] = create_game()
+
+    result = [
+        {
+            "type": "article",
+            "id": game_id,
+            "title": "💣 Start Mines Game",
+            "description": "Multiplayer minesweeper game. Click to play!",
+            "input_message_content": {
+                "message_text": f"🧨 XQueen Mines Game Started!\nClick a box and avoid the mine 💣"
+            },
+            "reply_markup": build_markup(game_id).to_dict()
+        }
+    ]
+    await query.answer(result, cache_time=1)
 
 # Start bot
-if __name__ == "__main__":
+if __name__ == '__main__':
+    BOT_TOKEN = os.environ.get("BOT_TOKEN")
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(InlineQueryHandler(inline_query_handler))
-    print("🎮 Inline Game Bot is running...")
+    app.add_handler(CallbackQueryHandler(button_handler))
+    print("🎮 Inline Mines Game Bot running...")
     app.run_polling()
