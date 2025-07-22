@@ -1,48 +1,49 @@
 import os
 import random
 import asyncio
-import logging
 from uuid import uuid4
 from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputTextMessageContent,
-    InlineQueryResultArticle,
+    InlineKeyboardButton, InlineKeyboardMarkup,
+    Update, InputTextMessageContent, InlineQueryResultArticle
 )
 from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
-    InlineQueryHandler,
-    ContextTypes,
-    CommandHandler,
+    Application, CallbackQueryHandler,
+    InlineQueryHandler, ContextTypes,
+    CommandHandler
 )
 
-# ========== CONFIG ==========
+# --------------------
+# GAME STORAGE
+# --------------------
 GAMES = {}
 RPS_PLAYERS = {}
+
 GRID_SIZE = 5
 TOTAL_MINES = 5
-GAME_DURATION = 120  # in seconds
-logging.basicConfig(level=logging.INFO)
+GAME_DURATION = 120  # seconds
 
-# ========== STYLE ==========
+# --------------------
+# STYLISH TEXT
+# --------------------
 def stylize(text):
     normal = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
     fancy = "𝒶𝒷𝒸𝒹𝑒𝒻𝑔𝒽𝒾𝒿𝓀𝓁𝓂𝓃𝑜𝓅𝓆𝓇𝓈𝓉𝓊𝓋𝓌𝓍𝓎𝓏ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     return ''.join(fancy[normal.index(c)] if c in normal else c for c in text)
 
-# ========== MINES GAME ==========
+# --------------------
+# MINES GAME
+# --------------------
 def create_mines_game():
     grid = [["⬜" for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
     mines = set()
     while len(mines) < TOTAL_MINES:
-        x, y = random.randint(0, GRID_SIZE-1), random.randint(0, GRID_SIZE-1)
+        x, y = random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1)
         mines.add((x, y))
     return {
         "grid": grid,
         "mines": mines,
         "revealed": set(),
+        "flags": set(),
         "over": False,
         "winner": None,
         "start_time": asyncio.get_event_loop().time()
@@ -89,8 +90,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     game['grid'][x][y] = "✅"
     game['revealed'].add((x, y))
-    remaining = GRID_SIZE * GRID_SIZE - len(game['mines']) - len(game['revealed'])
 
+    remaining = GRID_SIZE * GRID_SIZE - len(game['mines']) - len(game['revealed'])
     if remaining == 0:
         game['over'] = True
         game['winner'] = user
@@ -99,15 +100,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_reply_markup(reply_markup=build_markup(game_id))
 
-# ========== RPS GAME ==========
+# --------------------
+# RPS GAME
+# --------------------
 async def rps_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.chat.type == "private":
-        await update.message.reply_text("❌ Use this command in a group.")
+        await update.message.reply_text("Use this command in a group to challenge others!")
         return
 
     group_id = str(update.message.chat_id)
     if group_id in RPS_PLAYERS:
-        await update.message.reply_text("⚠️ A RPS game is already active in this group!")
+        await update.message.reply_text("⚠️ A RPS match is already active in this group!")
         return
 
     RPS_PLAYERS[group_id] = {}
@@ -116,7 +119,10 @@ async def rps_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
          InlineKeyboardButton("📄 Paper", callback_data="rps:paper"),
          InlineKeyboardButton("✂️ Scissors", callback_data="rps:scissors")]
     ]
-    await update.message.reply_text("🎮 Rock Paper Scissors started! Click your choice:", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(
+        "🎮 Rock Paper Scissors started! Click your choice:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 async def rps_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -127,7 +133,7 @@ async def rps_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = query.data.split(":")[1]
 
     if group_id not in RPS_PLAYERS:
-        await query.edit_message_text("❌ No active RPS session.")
+        await query.edit_message_text("❌ This RPS session expired or not started.")
         return
 
     RPS_PLAYERS[group_id][user_id] = (user_name, choice)
@@ -137,8 +143,11 @@ async def rps_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         players = list(RPS_PLAYERS[group_id].values())
         result_text = "\n".join([f"{u} → {c}" for u, c in players])
         winner = evaluate_rps(players)
-        result_text += f"\n\n🏆 {stylize(winner)} wins!" if winner else "\n\n🤝 It's a draw!"
-        await query.edit_message_text(f"🎮 Rock Paper Scissors Result:\n{result_text}")
+        if winner:
+            result_text += f"\n\n🏆 {stylize(winner)} wins!"
+        else:
+            result_text += "\n\n🤝 It's a draw!"
+        await query.edit_message_text(f"🎮 RPS Result:\n{result_text}")
         del RPS_PLAYERS[group_id]
     else:
         await query.edit_message_text("✅ 1 player selected. Waiting for more...")
@@ -146,14 +155,25 @@ async def rps_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def evaluate_rps(players):
     choices = {p[1] for p in players}
     if len(choices) == 1 or len(choices) == 3:
-        return None
+        return None  # Draw
+
     wins = {"rock": "scissors", "scissors": "paper", "paper": "rock"}
     for name1, c1 in players:
         if all(wins[c1] == c2 for _, c2 in players if c1 != c2):
             return name1
     return None
 
-# ========== INLINE QUERY ==========
+async def cancel_rps(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    group_id = str(update.message.chat_id)
+    if group_id in RPS_PLAYERS:
+        del RPS_PLAYERS[group_id]
+        await update.message.reply_text("❌ RPS game cancelled.")
+    else:
+        await update.message.reply_text("⚠️ No active RPS game to cancel.")
+
+# --------------------
+# INLINE QUERY HANDLER
+# --------------------
 async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.lower()
     results = []
@@ -175,12 +195,9 @@ async def inline_query_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.inline_query.answer(results[:10], cache_time=1)
 
-# ========== STARTUP LOG ==========
-async def startup_log(app: Application):
-    me = await app.bot.get_me()
-    logging.info(f"🚀 {me.first_name} is now running on Heroku...")
-
-# ========== START BOT ==========
+# --------------------
+# START BOT
+# --------------------
 if __name__ == "__main__":
     BOT_TOKEN = os.environ.get("BOT_TOKEN")
     app = Application.builder().token(BOT_TOKEN).build()
@@ -189,6 +206,7 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(button_handler, pattern=r"^.*:\d+:\d+$"))
     app.add_handler(CallbackQueryHandler(rps_click_handler, pattern=r"^rps:"))
     app.add_handler(CommandHandler("rps", rps_command))
+    app.add_handler(CommandHandler("cancelrps", cancel_rps))
 
-    app.post_init = startup_log
+    print("🎮 XQueen Inline Game Bot is running...")
     app.run_polling()
