@@ -1,9 +1,10 @@
+import os
 import random
 from telegram import InlineQueryResultArticle, InputTextMessageContent, Update
 from telegram.ext import Application, InlineQueryHandler, ContextTypes
 from uuid import uuid4
 
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # Replace this with your BotFather token
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Heroku env se token
 
 # Stylish font helper
 def stylize(text):
@@ -42,7 +43,10 @@ def word_scramble():
 def rps_game():
     user = random.choice(["🪨 Rock", "📄 Paper", "✂️ Scissors"])
     bot = random.choice(["🪨 Rock", "📄 Paper", "✂️ Scissors"])
-    result = "Draw" if user == bot else "You Win!" if (user == "🪨 Rock" and bot == "✂️ Scissors") or         (user == "📄 Paper" and bot == "🪨 Rock") or (user == "✂️ Scissors" and bot == "📄 Paper") else "You Lose!"
+    result = "Draw" if user == bot else "You Win!" if (
+        user == "🪨 Rock" and bot == "✂️ Scissors") or (
+        user == "📄 Paper" and bot == "🪨 Rock") or (
+        user == "✂️ Scissors" and bot == "📄 Paper") else "You Lose!"
     return f"🤖 {stylize('Bot chose')}: {bot}\n🙋 {stylize('You got')}: {user}\n🎮 {stylize(result)}"
 
 # Inline query handler
